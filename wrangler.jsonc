@@ -1,8 +1,15 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "react-soroban",
+  // 👈 告诉 Wrangler 入口文件在这里
+  "main": ".open-next/worker.js",
   "compatibility_date": "2026-07-16",
   "compatibility_flags": ["nodejs_compat"],
+  // 👈 告诉 Wrangler 静态资源（HTML/CSS/图片）在这里
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
   "observability": {
     "enabled": true,
   },
