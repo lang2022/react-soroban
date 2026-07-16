@@ -41,6 +41,7 @@ export type SorobanProps = {
   initialValue?: number;
   onChange?: (value: number) => void;
   className?: string;
+  highlightedColumnIndex?: number | null;
 };
 
 function digitToBeads(digit: number): Digit {
@@ -147,11 +148,13 @@ function Rod({
   digit,
   onChange,
   beadWidth,
+  isHighlighted,
 }: {
   index: number;
   digit: Digit;
   onChange: (digit: Digit) => void;
   beadWidth: number;
+  isHighlighted: boolean;
 }) {
   const place = 10 ** (RODS - 1 - index);
   const digitValue = (digit.heaven ? 5 : 0) + digit.earth;
@@ -161,7 +164,11 @@ function Rod({
   const hasUnitDot = index === RODS - 1 || index === RODS - 4;
 
   return (
-    <div className="relative flex flex-col items-center">
+    <div
+      className={`relative flex flex-col items-center rounded-2xl px-1 py-2 transition ${
+        isHighlighted ? "bg-orange-100/70 shadow-[0_0_0_1px_rgba(249,115,22,0.2)]" : ""
+      }`}
+    >
       <div
         className="relative"
         style={{ width: beadWidth + 16, height: HEAVEN_H }}
@@ -181,7 +188,9 @@ function Rod({
         style={{
           height: 12,
           background: PALETTE.beam,
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+          boxShadow: isHighlighted
+            ? "inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(249,115,22,0.35)"
+            : "inset 0 1px 0 rgba(255,255,255,0.08)",
         }}
       >
         {hasUnitDot && (
@@ -232,6 +241,7 @@ export function Soroban({
   initialValue = 0,
   onChange,
   className,
+  highlightedColumnIndex = null,
 }: SorobanProps) {
   const isControlled = value !== undefined;
   const [internalValue, setInternalValue] = useState(() =>
@@ -288,6 +298,7 @@ export function Soroban({
                 index={index}
                 digit={digit}
                 beadWidth={beadWidth}
+                isHighlighted={highlightedColumnIndex === index}
                 onChange={(nextDigit) => handleRodChange(index, nextDigit)}
               />
             ))}

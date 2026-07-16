@@ -1,13 +1,11 @@
 import type { Metadata } from "next"
 
 import { NumberGuideClientPage } from "@/components/number-guide-client-page"
+import { DEFAULT_LOCALE } from "@/lib/i18n/config"
+import { getHomeMetadata } from "@/lib/i18n/seo-copy"
 
-export const metadata: Metadata = {
-  title: "AbacusSnap: See any number on an abacus, instantly",
-  description:
-    "Free interactive abacus tool. Type a whole number or click beads to see the soroban representation instantly. Perfect for kids, parents, and mental math practice. No signup required.",
-}
+export const metadata: Metadata = getHomeMetadata(DEFAULT_LOCALE)
 
 export default function Page() {
-  return <NumberGuideClientPage initialValue={0} isHomePage />
+  return <NumberGuideClientPage initialValue={0} isHomePage locale={DEFAULT_LOCALE} />
 }

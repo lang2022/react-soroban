@@ -1,19 +1,22 @@
 import type { MetadataRoute } from "next"
 
-const BASE_URL = "https://www.abacussnap.com"
-const FOCUS_NUMBERS = [500, 1000, 2026, 888, 555, 999, 110, 170, 101, 2008, 10000, 9999999]
+import { getCoreSorobanNumbers } from "@/lib/core-soroban-numbers"
 
-function getSitemapNumbers() {
-  const sequentialNumbers = Array.from({ length: 200 }, (_, index) => index + 1)
-  return [...new Set([...sequentialNumbers, ...FOCUS_NUMBERS])]
-}
+const BASE_URL = "https://www.abacussnap.com"
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const dynamicRoutes = getSitemapNumbers().map((value) => ({
+  const englishRoutes = getCoreSorobanNumbers().map((value) => ({
     url: `${BASE_URL}/n/${value}`,
     lastModified: new Date(),
     changeFrequency: "weekly" as const,
     priority: 0.8,
+  }))
+
+  const germanRoutes = getCoreSorobanNumbers().map((value) => ({
+    url: `${BASE_URL}/de/n/${value}`,
+    lastModified: new Date(),
+    changeFrequency: "weekly" as const,
+    priority: 0.75,
   }))
 
   return [
@@ -23,6 +26,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "daily" as const,
       priority: 1,
     },
-    ...dynamicRoutes,
+    {
+      url: `${BASE_URL}/de`,
+      lastModified: new Date(),
+      changeFrequency: "weekly" as const,
+      priority: 0.9,
+    },
+    ...englishRoutes,
+    ...germanRoutes,
   ]
 }
