@@ -21,8 +21,8 @@ const PALETTE = {
   rodShadow: "#7c5a3d",
   beadFace: "#f5e7d0",
   beadEdge: "#d9c2a5",
-  beadActive: "#f59e0b",
-  beadActiveEdge: "#b45309",
+  beadActive: "#d97706",
+  beadActiveEdge: "#92400e",
 };
 
 const BEAD_CLIP =
@@ -168,6 +168,17 @@ function Rod({
       className={`relative flex flex-col items-center rounded-2xl px-1 py-2 transition ${
         isHighlighted ? "bg-orange-100/70 shadow-[0_0_0_1px_rgba(249,115,22,0.2)]" : ""
       }`}
+      tabIndex={0}
+      role="spinbutton"
+      aria-valuemin={0}
+      aria-valuemax={9}
+      aria-valuenow={digitValue}
+      aria-label={`Rod ${RODS - index}, value ${digitValue}`}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); onChange({ heaven: digitValue + 1 >= 5 ? true : digit.heaven, earth: Math.min(4, ((digitValue + 1) % 5) >= 0 ? (digitValue + 1 >= 5 ? (digitValue + 1 - 5) : digitValue + 1) : digit.earth) as Digit["earth"] }) }
+        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); const v = Math.max(0, digitValue - 1); onChange({ heaven: v >= 5, earth: (v >= 5 ? v - 5 : v) as Digit["earth"] }) }
+        else if (e.key >= "0" && e.key <= "9") { e.preventDefault(); e.stopPropagation(); const v = Number(e.key); onChange({ heaven: v >= 5, earth: (v >= 5 ? v - 5 : v) as Digit["earth"] }) }
+      }}
     >
       <div
         className="relative"
@@ -222,9 +233,9 @@ function Rod({
         })}
       </div>
 
-      <div className="mt-2 font-mono text-sm tabular-nums text-stone-200">
+      <div className="mt-2 font-mono text-sm font-semibold tabular-nums text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
         {digitValue}
-        <span className="ml-0.5 text-[10px] text-stone-300">
+        <span className="ml-0.5 text-[10px] font-medium text-amber-200/90">
           {place >= 1000
             ? `×${place.toLocaleString()}`
             : place > 1
@@ -249,7 +260,13 @@ export function Soroban({
   );
   const currentValue = isControlled ? clampSorobanValue(value) : internalValue;
   const digits = useMemo(() => valueToDigits(currentValue), [currentValue]);
-  const beadWidth = 40;
+  const [beadWidth, setBeadWidth] = useState(40);
+  useEffect(() => {
+    const update = () => setBeadWidth(window.innerWidth < 400 ? 30 : window.innerWidth < 640 ? 34 : 40);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   useEffect(() => {
     if (!isControlled) {
@@ -291,7 +308,7 @@ export function Soroban({
               "0 20px 40px -16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08), inset 0 0 0 1px rgba(58,35,20,0.55)",
           }}
         >
-          <div className="flex gap-2 sm:gap-3">
+          <div className="flex gap-1 sm:gap-3">
             {digits.map((digit, index) => (
               <Rod
                 key={index}

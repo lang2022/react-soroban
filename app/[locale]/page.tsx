@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { NumberGuideClientPage } from "@/components/number-guide-client-page"
 import { isSupportedLocale, type Locale } from "@/lib/i18n/config"
 import { getHomeMetadata } from "@/lib/i18n/seo-copy"
+import { canonicalFor, hreflangFor } from "@/lib/seo"
 
 type PageProps = {
   params: Promise<{
@@ -18,7 +19,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {}
   }
 
-  return getHomeMetadata(locale)
+  return {
+    ...getHomeMetadata(locale),
+    alternates: {
+      canonical: canonicalFor(locale, "/"),
+      languages: hreflangFor("/"),
+    },
+  }
 }
 
 export default async function LocalizedHomePage({ params }: PageProps) {

@@ -1,9 +1,10 @@
 import type { Metadata } from "next"
 
 import { NumberGuideClientPage } from "@/components/number-guide-client-page"
-import { getCoreSorobanNumbers } from "@/lib/core-soroban-numbers"
+import { CURATED_SITEMAP_NUMBERS } from "@/lib/core-soroban-numbers"
 import { DEFAULT_LOCALE } from "@/lib/i18n/config"
 import { getNumberMetadata } from "@/lib/i18n/seo-copy"
+import { canonicalFor, hreflangFor } from "@/lib/seo"
 import { parseSorobanNumber } from "@/lib/soroban-number"
 
 type PageProps = {
@@ -13,7 +14,7 @@ type PageProps = {
 }
 
 export function generateStaticParams() {
-  return getCoreSorobanNumbers().map((value) => ({
+  return CURATED_SITEMAP_NUMBERS.map((value) => ({
     number: String(value),
   }))
 }
@@ -22,7 +23,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { number } = await params
   const { value } = parseSorobanNumber(number)
 
-  return getNumberMetadata(DEFAULT_LOCALE, value)
+  return {
+    ...getNumberMetadata(DEFAULT_LOCALE, value),
+    alternates: {
+      canonical: canonicalFor(DEFAULT_LOCALE, `/n/${value}`),
+      languages: hreflangFor(`/n/${value}`),
+    },
+  }
 }
 
 export default async function NumberGuidePage({ params }: PageProps) {

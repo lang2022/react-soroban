@@ -2,9 +2,10 @@ import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 
 import { NumberGuideClientPage } from "@/components/number-guide-client-page"
-import { getCoreSorobanNumbers } from "@/lib/core-soroban-numbers"
-import { isLaunchLocale, isSupportedLocale, type Locale } from "@/lib/i18n/config"
+import { CURATED_SITEMAP_NUMBERS } from "@/lib/core-soroban-numbers"
+import { isLaunchLocale, isSupportedLocale, LAUNCH_LOCALES, type Locale } from "@/lib/i18n/config"
 import { getNumberMetadata } from "@/lib/i18n/seo-copy"
+import { canonicalFor, hreflangFor } from "@/lib/seo"
 import { parseSorobanNumber } from "@/lib/soroban-number"
 
 type PageProps = {
@@ -15,8 +16,8 @@ type PageProps = {
 }
 
 export function generateStaticParams() {
-  return getCoreSorobanNumbers().flatMap((value) =>
-    ["de"].map((locale) => ({
+  return CURATED_SITEMAP_NUMBERS.flatMap((value) =>
+    LAUNCH_LOCALES.filter((locale) => locale !== "en").map((locale) => ({
       locale,
       number: String(value),
     })),
@@ -31,7 +32,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 
   const { value } = parseSorobanNumber(number)
-  return getNumberMetadata(locale as Locale, value)
+  return {
+    ...getNumberMetadata(locale as Locale, value),
+    alternates: {
+      canonical: canonicalFor(locale as Locale, `/n/${value}`),
+      languages: hreflangFor(`/n/${value}`),
+    },
+  }
 }
 
 export default async function LocalizedNumberGuidePage({ params }: PageProps) {

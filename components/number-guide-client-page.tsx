@@ -1,14 +1,19 @@
 "use client"
 
 import Link from "next/link"
+import { Box, ImagePlus } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { DomainGuard } from "@/components/domain-guard"
 import { Soroban } from "@/components/soroban"
 import { Button } from "@/components/ui/button"
+import { CURATED_SITEMAP_NUMBERS } from "@/lib/core-soroban-numbers"
 import { getNumberGuideCopy, type NumberGuideCopy } from "@/lib/i18n/abacus-copy"
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config"
+import { loadProgress, recordWin } from "@/lib/progress"
+import { randomQuizTarget, renderAbacusShareBlob, type QuizLevel } from "@/lib/share-image"
+import { openWorksheetPrint } from "@/lib/worksheet"
 import {
   clampSorobanValue,
   formatSorobanValue,
@@ -404,7 +409,10 @@ function buildAbacusAriaLabel(locale: Locale, value: number) {
     const labels = placeLabels[locale][startIndex + index]
     return `${digit} ${digit === 1 ? labels.singular : labels.plural}`
   })
-  const summary = `${fragments.slice(0, -1).join(", ")}, and ${fragments[fragments.length - 1]}`
+  const joiner = locale === "de" ? " und " : locale === "fr" ? " et " : ", and "
+  const summary = fragments.length > 2 && locale === "en"
+    ? `${fragments.slice(0, -1).join(", ")}, and ${fragments[fragments.length - 1]}`
+    : fragments.join(joiner)
 
   if (locale === "de") {
     return `Interaktiver Abakus zur Darstellung von ${normalized} mit ${summary}.`
@@ -431,6 +439,11 @@ export function NumberGuideClientPage({
   const [currentValue, setCurrentValue] = useState(() => clampSorobanValue(initialValue))
   const [inputValue, setInputValue] = useState(() => String(clampSorobanValue(initialValue)))
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [inputError, setInputError] = useState<string | null>(null)
+  const [quizTarget, setQuizTarget] = useState<number | null>(null)
+  const [quizLevel, setQuizLevel] = useState<QuizLevel>("hard")
+  const [quizScore, setQuizScore] = useState(0)
+  const [progress, setProgress] = useState(() => ({ best: 0, streak: 0 }))
   const [legalModal, setLegalModal] = useState<LegalModalType>(null)
   const [activeColumnIndex, setActiveColumnIndex] = useState<number | null>(null)
 
@@ -473,11 +486,65 @@ export function NumberGuideClientPage({
   }, [])
 
   useEffect(() => {
-    if (!toastMessage) return
+    try {
+      const p = loadProgress()
+      setProgress({ best: p.best, streak: p.streak })
+    } catch { /* ssr-safe */ }
+  }, [])
 
+  const startQuiz = useCallback((level: QuizLevel = quizLevel) => {
+    const target = randomQuizTarget(level)
+    setQuizLevel(level)
+    setQuizTarget(target)
+    setQuizScore(0)
+    commitValue(0)
+    setToastMessage(copy.quizStart(target))
+    if ("speechSynthesis" in window) {
+      try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(copy.quizSpeak(target))) } catch { /* noop */ }
+    }
+  }, [commitValue, copy, quizLevel])
+
+  const checkQuiz = useCallback(() => {
+    if (quizTarget === null) return
+    if (currentValue === quizTarget) {
+      const next = quizScore + 1
+      setQuizScore(next)
+      setProgress(recordWin(next, quizTarget))
+      setToastMessage(copy.quizCorrect(next))
+      const t = randomQuizTarget(quizLevel)
+      setQuizTarget(t)
+      commitValue(0)
+    } else {
+      setToastMessage(copy.quizMiss(quizTarget, formatSorobanValue(currentValue)))
+    }
+  }, [quizTarget, quizScore, currentValue, commitValue, copy, quizLevel])
+
+  const shareImage = useCallback(async () => {
+    try {
+      const blob = await renderAbacusShareBlob(currentValue)
+      const file = new File([blob], `abacus-${currentValue}.png`, { type: "image/png" })
+      const nav = navigator as Navigator & { share?: (d: { files: File[]; title: string }) => Promise<void>; canShare?: (d: { files: File[] }) => boolean }
+      if (nav.canShare?.({ files: [file] })) {
+        await nav.share({ files: [file], title: `${copy.imageShareTitle} ${currentValue}` })
+      } else {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = file.name
+        a.click()
+        URL.revokeObjectURL(url)
+        setToastMessage(copy.imageDownloadedToast)
+      }
+    } catch {
+      setToastMessage(copy.imageFailedToast)
+    }
+  }, [currentValue, copy])
+
+  useEffect(() => {
+    if (!toastMessage) return
     const timeoutId = window.setTimeout(() => {
       setToastMessage(null)
-    }, 2600)
+    }, 3000)
 
     return () => window.clearTimeout(timeoutId)
   }, [toastMessage])
@@ -485,26 +552,90 @@ export function NumberGuideClientPage({
   const teachingText = useMemo(() => buildTeachingText(locale, currentValue), [locale, currentValue])
   const howToSteps = useMemo(() => buildHowToSteps(locale, currentValue), [locale, currentValue])
   const howToSchema = useMemo(() => buildHowToSchema(locale, currentValue, howToSteps), [locale, currentValue, howToSteps])
+  const breadcrumbSchema = useMemo(() => {
+    const base = typeof window === "undefined" ? "" : window.location.origin;
+    const prefix = locale === DEFAULT_LOCALE ? "" : `/${locale}`;
+    return {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: copy.breadcrumbHome, item: `${base}${prefix || "/"}` },
+        { "@type": "ListItem", position: 2, name: copy.breadcrumbNumbers, item: `${base}${prefix}/n/${currentValue}` },
+        { "@type": "ListItem", position: 3, name: formatSorobanValue(currentValue) },
+      ],
+    };
+  }, [locale, currentValue, copy, pathPrefix])
+  const faqSchema = useMemo(() => {
+    const label = formatSorobanValue(currentValue);
+    const qa =
+      locale === "de"
+        ? [
+            { q: `Wie liest man ${label} auf dem Abakus?`, a: teachingText },
+            { q: "Wie setzt man den Abakus zurück?", a: "Schiebe alle oberen Perlen vom Balken weg und alle unteren Perlen nach unten." },
+            { q: "Für welches Alter ist das geeignet?", a: "Für Kinder ab 5 Jahren sowie Eltern und Lehrkräfte im mentalen Rechentraining." },
+          ]
+        : locale === "fr"
+          ? [
+              { q: `Comment lire ${label} sur un abaque ?`, a: teachingText },
+              { q: "Comment remettre l'abaque à zéro ?", a: "Écartez toutes les perles supérieures de la barre et abaissez toutes les perles inférieures." },
+              { q: "À quel âge convient cet outil ?", a: "Aux enfants dès 5 ans, ainsi qu'aux parents et enseignants pour le calcul mental." },
+            ]
+          : [
+              { q: `How do you read ${label} on a soroban?`, a: teachingText },
+              { q: "How do you reset the abacus?", a: "Move every upper bead away from the beam and rest every lower bead at the bottom." },
+              { q: "What age is this for?", a: "Kids ages 5 and up, plus parents and teachers practicing mental math." },
+            ];
+    return {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: qa.map((item: { q: string; a: string }) => ({
+        "@type": "Question",
+        name: item.q,
+        acceptedAnswer: { "@type": "Answer", text: item.a },
+      })),
+    };
+  }, [locale, currentValue, teachingText])
   const abacusAriaLabel = useMemo(() => buildAbacusAriaLabel(locale, currentValue), [locale, currentValue])
 
   const handleWorksheetClick = useCallback(() => {
-    setToastMessage(copy.worksheetToast(formatSorobanValue(currentValue)))
-  }, [copy, currentValue])
+    const ok = openWorksheetPrint(currentValue)
+    setToastMessage(ok ? copy.worksheetOpenedToast(formatSorobanValue(currentValue)) : copy.popupBlockedToast)
+  }, [currentValue, copy])
 
   const handleCopyShareLink = useCallback(async () => {
+    const shareText = copy.shareCopyTemplate(formatSorobanValue(currentValue), window.location.href)
     try {
-      const shareText = copy.shareCopyTemplate(formatSorobanValue(currentValue), window.location.href)
       await navigator.clipboard.writeText(shareText)
       setToastMessage(copy.shareToast)
     } catch {
-      setToastMessage("Copy failed. Please copy the URL from your browser address bar.")
+      try {
+        const ta = document.createElement("textarea")
+        ta.value = shareText
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand("copy")
+        document.body.removeChild(ta)
+        setToastMessage(copy.shareToast)
+      } catch {
+        window.prompt(copy.copyPromptLabel, shareText)
+        setToastMessage(copy.copyFailedToast)
+      }
     }
   }, [copy, currentValue])
 
   const handleApplyInput = useCallback(() => {
-    const { value } = parseSorobanNumber(inputValue)
+    const raw = inputValue.trim()
+    const { value, wasClamped } = parseSorobanNumber(raw)
+    if (!raw || /[^0-9]/.test(raw)) {
+      setInputError(copy.inputInvalidError(MAX_SOROBAN_VALUE.toLocaleString("en-US"), formatSorobanValue(value)))
+    } else if (wasClamped) {
+      setInputError(copy.inputClampedError(formatSorobanValue(value)))
+      setToastMessage(copy.clampToast(formatSorobanValue(value)))
+    } else {
+      setInputError(null)
+    }
     commitValue(value)
-  }, [commitValue, inputValue])
+  }, [commitValue, inputValue, copy])
 
   const handleRandom = useCallback(() => {
     const value = Math.floor(Math.random() * MAX_SOROBAN_VALUE) + 1
@@ -514,6 +645,26 @@ export function NumberGuideClientPage({
   const handleReset = useCallback(() => {
     commitValue(0)
   }, [commitValue])
+
+  // Keyboard: R random, C reset, arrows ±1/±10, ESC closes modal
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return
+      if (legalModal) {
+        if (e.key === "Escape") setLegalModal(null)
+        return
+      }
+      if (e.key === "r" || e.key === "R") handleRandom()
+      else if (e.key === "c" || e.key === "C") handleReset()
+      else if (e.key === "ArrowUp") { e.preventDefault(); commitValue(currentValue + 1) }
+      else if (e.key === "ArrowDown") { e.preventDefault(); commitValue(currentValue - 1) }
+      else if (e.key === "ArrowRight") { e.preventDefault(); commitValue(currentValue + 10) }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); commitValue(currentValue - 10) }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [legalModal, handleRandom, handleReset, commitValue, currentValue])
 
   const handleGuideClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>, value: number) => {
@@ -591,10 +742,91 @@ Contact Information
     <DomainGuard>
       <main className="min-h-dvh bg-[radial-gradient(circle_at_top,_rgba(255,251,235,0.98),_rgba(255,247,237,0.95)_35%,_rgba(245,245,244,0.94)_100%)] px-4 py-8 sm:px-6 lg:px-8">
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(howToSchema) }} />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }} />
+        {!isHomePage && (
+          <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }} />
+        )}
 
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
           <section className="overflow-hidden rounded-[2.5rem] border border-amber-100 bg-white/90 p-5 shadow-[0_30px_80px_-30px_rgba(180,83,9,0.28)] backdrop-blur sm:p-8 lg:p-10">
             <div id="app-header" className="mx-auto flex max-w-4xl flex-col items-center text-center">
+              <nav aria-label="Breadcrumb" className="mb-3 flex w-full flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
+                <ol className="flex flex-wrap items-center gap-1.5">
+                  <li>
+                    <Link href={pathPrefix || "/"} className="rounded-full px-2 py-1 transition hover:bg-amber-50 hover:text-orange-700">
+                      {copy.breadcrumbHome}
+                    </Link>
+                  </li>
+                  <li aria-hidden="true">/</li>
+                  <li>
+                    <Link href={`${pathPrefix}/n/${currentValue}`} className="rounded-full px-2 py-1 transition hover:bg-amber-50 hover:text-orange-700">
+                      {copy.breadcrumbNumbers}
+                    </Link>
+                  </li>
+                  <li aria-hidden="true">/</li>
+                  <li aria-current="page" className="font-semibold text-stone-700">
+                    {formatSorobanValue(currentValue)}
+                  </li>
+                </ol>
+                <div className="flex items-center gap-1" aria-label="Language">
+                  {(
+                    [
+                      { id: "en", label: "EN", href: `/n/${currentValue}` },
+                      { id: "de", label: "DE", href: `/de/n/${currentValue}` },
+                      { id: "fr", label: "FR", href: `/fr/n/${currentValue}` },
+                    ] as const
+                  ).map((l) => (
+                    <Link
+                      key={l.id}
+                      href={l.href}
+                      hrefLang={l.id}
+                      aria-current={locale === l.id ? "true" : undefined}
+                      className={`rounded-full px-2.5 py-1 font-semibold transition ${
+                        locale === l.id
+                          ? "bg-stone-900 text-white"
+                          : "text-stone-500 hover:bg-amber-50 hover:text-orange-700"
+                      }`}
+                    >
+                      {l.label}
+                    </Link>
+                  ))}
+                </div>
+              </nav>
+              {(() => {
+                const idx = CURATED_SITEMAP_NUMBERS.indexOf(currentValue);
+                const prev = idx > 0 ? CURATED_SITEMAP_NUMBERS[idx - 1] : null;
+                const next =
+                  idx >= 0 && idx < CURATED_SITEMAP_NUMBERS.length - 1
+                    ? CURATED_SITEMAP_NUMBERS[idx + 1]
+                    : null;
+                if (prev === null && next === null) return null;
+                return (
+                  <div className="mb-4 flex w-full items-center justify-between gap-2 text-sm">
+                    {prev !== null ? (
+                      <Link
+                        href={`${pathPrefix}/n/${prev}`}
+                        onClick={(e) => handleGuideClick(e, prev)}
+                        className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-orange-700 transition hover:bg-amber-100"
+                      >
+                        {copy.prevLabel}: {prev.toLocaleString("en-US")}
+                      </Link>
+                    ) : (
+                      <span />
+                    )}
+                    {next !== null ? (
+                      <Link
+                        href={`${pathPrefix}/n/${next}`}
+                        onClick={(e) => handleGuideClick(e, next)}
+                        className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 font-medium text-orange-700 transition hover:bg-amber-100"
+                      >
+                        {copy.nextLabel}: {next.toLocaleString("en-US")}
+                      </Link>
+                    ) : (
+                      <span />
+                    )}
+                  </div>
+                );
+              })()}
               {!isHomePage && (
                 <div className="mb-4 w-full text-left">
                   <Link
@@ -605,9 +837,20 @@ Contact Information
                   </Link>
                 </div>
               )}
-              <h1 className="text-balance text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl lg:text-6xl">
-                AbacusSnap
-              </h1>
+              {isHomePage ? (
+                <h1 className="text-balance text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl lg:text-6xl">
+                  AbacusSnap
+                </h1>
+              ) : (
+                <>
+                  <div className="text-sm font-semibold uppercase tracking-[0.25em] text-orange-600">
+                    AbacusSnap
+                  </div>
+                  <h1 className="text-balance text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl lg:text-6xl">
+                    {copy.numberH1(formatSorobanValue(currentValue))}
+                  </h1>
+                </>
+              )}
               <p className="mt-1 mb-6 text-center text-lg font-medium tracking-tight text-amber-800/80 md:text-xl">
                 {copy.sloganPrefix} <strong className="font-bold text-orange-600">{copy.sloganEmphasis}</strong>.
               </p>
@@ -623,9 +866,9 @@ Contact Information
               <div
                 role="img"
                 aria-label={abacusAriaLabel}
-                className="w-full overflow-x-auto rounded-[2rem] border border-amber-100 bg-[linear-gradient(180deg,rgba(255,251,235,0.9),rgba(255,247,237,0.8))] p-3 shadow-inner sm:p-6"
+                className="w-full overflow-x-auto rounded-[2rem] border border-amber-100 bg-[linear-gradient(180deg,rgba(255,251,235,0.9),rgba(255,247,237,0.8))] p-2 shadow-inner sm:p-6"
               >
-                <div className="mx-auto w-fit min-w-max origin-top scale-[0.92] sm:scale-100">
+                <div className="mx-auto w-fit max-w-full">
                   <Soroban value={currentValue} onChange={commitValue} highlightedColumnIndex={activeColumnIndex} />
                 </div>
               </div>
@@ -651,7 +894,8 @@ Contact Information
                   }}
                   placeholder={copy.inputPlaceholder}
                   aria-label={copy.inputPlaceholder}
-                  className="h-14 w-full rounded-full border border-amber-200 bg-white px-5 text-base text-stone-900 shadow-sm outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                  aria-invalid={inputError ? true : undefined}
+                  className={`h-14 w-full rounded-full border bg-white px-5 text-base text-stone-900 shadow-sm outline-none transition focus:ring-4 ${inputError ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-amber-200 focus:border-amber-400 focus:ring-amber-100"}`}
                 />
                 <Button
                   size="lg"
@@ -662,6 +906,23 @@ Contact Information
                 </Button>
               </div>
               <p className="mt-3 text-sm text-stone-500">{copy.inputHelp(MAX_SOROBAN_VALUE.toLocaleString("en-US"))}</p>
+              {inputError && <p role="alert" className="mt-2 text-sm font-medium text-red-600">{inputError}</p>}
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 text-xs text-stone-500" aria-label={copy.keyboardHint}>
+                <kbd className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-stone-700">↑</kbd>
+                <kbd className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-stone-700">↓</kbd>
+                <span>±1</span>
+                <span aria-hidden="true" className="text-stone-300">·</span>
+                <kbd className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-stone-700">←</kbd>
+                <kbd className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-stone-700">→</kbd>
+                <span>±10</span>
+                <span aria-hidden="true" className="text-stone-300">·</span>
+                <kbd className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-stone-700">R</kbd>
+                <span>{copy.randomLabel.replace(/^.{0,3}\s*/, "")}</span>
+                <span aria-hidden="true" className="text-stone-300">·</span>
+                <kbd className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-stone-700">C</kbd>
+                <span>{copy.resetLabel.replace(/^.{0,3}\s*/, "")}</span>
+                <span className="sr-only">{copy.keyboardHint}</span>
+              </div>
 
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                 <Button
@@ -687,6 +948,7 @@ Contact Information
                   size="lg"
                   className="rounded-full bg-amber-500 px-6 text-sm text-white hover:bg-amber-600 sm:text-base"
                   onClick={handleWorksheetClick}
+                  title="Opens a printable practice sheet (save as PDF)"
                 >
                   {copy.worksheetLabel}
                 </Button>
@@ -698,6 +960,35 @@ Contact Information
                 >
                   {copy.shareLabel}
                 </Button>
+                <Button variant="outline" size="lg" className="gap-2 rounded-full px-6" onClick={shareImage}>
+                  <ImagePlus aria-hidden="true" className="size-4" />
+                  Image
+                </Button>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm">
+                <span className="text-xs font-medium text-stone-500">{copy.quizLevelLabel}:</span>
+                {copy.quizLevels.map((l) => (
+                  <Button
+                    key={l.id}
+                    variant={quizTarget !== null && quizLevel === l.id ? "default" : "outline"}
+                    size="sm"
+                    className="rounded-full"
+                    title={l.hint}
+                    onClick={() => startQuiz(l.id)}
+                  >
+                    {l.label}
+                  </Button>
+                ))}
+                {quizTarget === null ? null : (
+                  <>
+                    <span className="rounded-full bg-stone-900 px-4 py-1.5 font-semibold text-white">{copy.targetLabel}: {quizTarget} · {copy.scoreLabel}: {quizScore}</span>
+                    <Button size="sm" className="rounded-full" onClick={checkQuiz}>{copy.checkLabel}</Button>
+                    <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setQuizTarget(null)}>{copy.exitLabel}</Button>
+                  </>
+                )}
+                {(progress.best > 0 || progress.streak > 0) && (
+                  <span className="text-xs text-stone-500">{copy.bestLabel} {progress.best} · <Box aria-hidden="true" className="inline size-3.5 align-[-2px]" /> {progress.streak}-{copy.streakLabel}</span>
+                )}
               </div>
             </div>
           </section>
@@ -727,7 +1018,7 @@ Contact Information
             </aside>
 
             <article className="rounded-[2rem] border border-amber-100 bg-white/90 p-6 shadow-[0_20px_60px_-30px_rgba(180,83,9,0.24)] backdrop-blur">
-              <details className="group rounded-[1.5rem] border border-amber-100 bg-amber-50/40 p-5">
+              <details className="group rounded-[1.5rem] border border-amber-100 bg-amber-50/40 p-5" open={!isHomePage}>
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-lg font-semibold tracking-tight text-stone-900">
                   <span>{copy.optionalGuideTitle}</span>
                   <span className="text-sm text-orange-600 transition-transform group-open:rotate-180">▼</span>
@@ -744,7 +1035,7 @@ Contact Information
                         onMouseEnter={() => setActiveColumnIndex(step.columnIndex)}
                         onMouseLeave={() => setActiveColumnIndex(null)}
                       >
-                        <span className="font-medium text-stone-900">Step {index + 1}.</span> {step.text}
+                        <span className="font-medium text-stone-900">{copy.stepLabel} {index + 1}.</span> {step.text}
                       </li>
                     ))}
                   </ol>
@@ -805,7 +1096,7 @@ Contact Information
                     <p className="mt-3 text-sm leading-7 whitespace-pre-line text-stone-600">{legalCopy.body}</p>
                   </div>
                   <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setLegalModal(null)}>
-                    Close
+                    {copy.closeLabel}
                   </Button>
                 </div>
               </motion.div>
