@@ -7,7 +7,7 @@ const ALLOWED_EXACT_HOSTS = new Set([
   "www.abacussnap.com",
 ])
 
-const ALLOWED_SUFFIXES = [".abacussnap.com"]
+const ALLOWED_SUFFIXES = [".abacussnap.com", ".vercel.app"]
 
 function normalizeHostname(hostname: string) {
   return hostname.trim().toLowerCase()

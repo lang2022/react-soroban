@@ -7,7 +7,7 @@ const ALLOWED_EXACT = new Set([
   "www.abacussnap.com",
 ]);
 
-const ALLOWED_SUFFIXES = [".abacussnap.com"];
+const ALLOWED_SUFFIXES = [".abacussnap.com", ".vercel.app"];
 const OFFICIAL = "https://www.abacussnap.com";
 
 function authorized(hostname: string): boolean {
